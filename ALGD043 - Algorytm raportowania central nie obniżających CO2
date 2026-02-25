@@ -1,0 +1,115 @@
+#!/usr/bin/env python
+from datetime import datetime, timedelta
+from globalvars import gsAplikacjaID, gsMnemonikWlasciciela
+from System import DateTime
+import pytz
+import time
+def addTableToMail(table, header, textAbove, alarms):
+    if not table:        
+        table = f"{header}<h1>{textAbove}</h1>"
+    else:
+        table = f"{table}<h1>{textAbove}</h1>"
+    table = f"{table}<table class='old-table'><tr class='firstRow'>"
+    table = f"{table}<td>MPK</td><td>CO2 w momencie włączenia centrali</td><td>CO2 po 60 minutach od włączenia centrali</td></tr>"
+    previousMPK = None
+    whiteRow = True
+    for alarm in alarms:        
+        if previousMPK != alarm["mpk"]:
+            whiteRow = not whiteRow
+        if whiteRow:
+            table = f'{table}<tr><td>{alarm["mpk"]}</td><td>{alarm["co2start"]}</td><td>{alarm["co2after60"]}</td></tr>'
+        else:
+            table = f'{table}<tr bgcolor="Wheat"><td>{alarm["mpk"]}</td><td>{alarm["co2start"]}</td><td>{alarm["co2after60"]}</td></td></tr>'
+        previousMPK = alarm["mpk"]    
+    table = f"{table}</tr></table></br></br>"
+    return table
+def generate_yesterday_minutes(day):
+    # Get today's date and subtract one day to get yesterday
+    yesterday = datetime.now() - timedelta(days=1) - timedelta(days=day)
+    # Set the start of the day (00:00) and end of the day (23:59) for yesterday
+    start_time = yesterday.replace(hour=0, minute=0, second=0, microsecond=0)
+    end_time = yesterday.replace(hour=23, minute=59, second=0, microsecond=0)
+    # Create a list to store all minute-based daytimes
+    minutes_list = []
+    # Generate each minute from start_time to end_time
+    current_time = start_time
+    while current_time <= end_time:
+        minutes_list.append(current_time)
+        current_time += timedelta(minutes=1)
+    return minutes_list
+def create_co2_object(attributeNameTSO, yesterdayMinutes, dataTSO):
+    # Initialize the CO2 object
+    co2_object = {attributeNameTSO: [], "TimeStamp": yesterdayMinutes}
+    # Initialize the CO2 day list
+    co2_day_list = []
+    # Index to track the current position in the dataTSO list
+    index = 0
+    # Loop through each minute in yesterdayMinutes
+    for minute in yesterdayMinutes:
+        # If the current minute is before the first DateTime in dataTSO, use the first value
+        if minute < dataTSO[0].DateTime:
+            co2_day_list.append(float(dataTSO[0].Value))
+            #co2_day_list.append(-1)
+        else:
+            # Otherwise, use the value at the current index
+            co2_day_list.append(float(dataTSO[index].Value))
+            # If the current minute is after the current index's DateTime, move to the next index
+            if minute > dataTSO[index].DateTime and index < len(dataTSO) - 1:
+                index += 1
+    # Update the co2_object with the populated CO2 day list
+    co2_object[attributeNameTSO] = co2_day_list
+    return co2_object
+warsawTz = pytz.timezone('Europe/Warsaw')
+current_date = datetime.now(warsawTz)
+open_date = current_date.replace(hour=0, minute=0, second=0, microsecond=0) - timedelta(days=1)
+close_date = current_date.replace(hour=0, minute=0, second=0, microsecond=0)
+#logger.Info(close_date)
+ahuAttribute = "SupFan"
+ahuList = deviceService.GetDevicesParameterListFromMnemonic("AHU0", [ahuAttribute])
+full_identifiers = [item.FullIdentifier for item in ahuList]
+ahuSupFan_collection = deviceLastAttributeValueService.GetList("*AHU0", ["SupFan"])
+ahuSupFan_dict = {}
+for item in ahuSupFan_collection:
+    # Access the properties of the .NET object
+    mpk = item.FullIdentifier[4:8]
+    # Create a new dictionary for the values
+    item_dict = {
+        'Name': item.Name,
+        'TimeStamp': item.TimeStamp,
+        'Value': item.Value,
+        'NumericValue': item.NumericValue,
+        'FullIdentifier': item.FullIdentifier
+    }
+    # Add the new dictionary to the result, with the FullIdentifier as the key
+    if mpk not in ahuSupFan_dict:
+        ahuSupFan_dict[mpk] = {}
+    ahuSupFan_dict[mpk][item.Name] = item_dict
+yesterday_minutes = generate_yesterday_minutes(0)
+alarms = []
+for item in ahuSupFan_dict:
+    dataset = deviceRecordsService.GetRawRecords([ahuAttribute], [ahuSupFan_dict[item]["SupFan"]["FullIdentifier"]], open_date, close_date)
+    if not dataset:
+            break
+    dataset = dataset[0].Data
+    dataset_remade = create_co2_object("SupFan", yesterday_minutes, dataset)["SupFan"]
+    dataset_co2 = deviceRecordsService.GetRawRecords(["SalesZoneCO2"], [f'{ahuSupFan_dict[item]["SupFan"]["FullIdentifier"][0:8]}0000TSO0'], open_date, close_date)
+    if not dataset_co2:
+            break
+    dataset_co2 = dataset_co2[0].Data
+    dataset_co2_remade = create_co2_object("SalesZoneCO2", yesterday_minutes, dataset_co2)["SalesZoneCO2"]
+    indices = indices = [
+        i for i in range(1, len(dataset_remade) - 60)  # ensure there are 60 elements ahead
+        if dataset_remade[i-1] == 0 and dataset_remade[i] == 1 and all(dataset_remade[i:i+60])
+    ]
+    for index in indices:
+        if dataset_co2_remade[index] <= dataset_co2_remade[index+60] and dataset_co2_remade[index] > 1000:
+            alarms.append({"mpk": ahuSupFan_dict[item]["SupFan"]["FullIdentifier"][4:8], "co2start": dataset_co2_remade[index], "co2after60": dataset_co2_remade[index+60]})
+            break
+    #if alarms:
+    #    break
+header = "<style>.old-table{border-collapse:collapse;border-style:hidden;    border-width:1px;    border-style:solid;    border-color:black;    font-family:Montserrat;    font-size:11px;    text-align:center;}.old-table td {    border:1px solid black;    padding:8;}.old-table th{    border:1pxsolidblack;    padding:4;}.firstRow{    background-color:#e67e22;    color:white;}h1{    font-family:Montserrat;    font-size:21px;}h2{    font-family:Montserrat;    font-size:16px;} .outer-table {border-collapse: collapse;border-spacing: 0px;} .outer-table td {padding: 0;} .inner-table { border-collapse: collapse; border-spacing: 0;font-family:Montserrat;    font-size:11px;    text-align:center;} .inner-table td {border: 1px solid black;padding: 8;} </style>"
+table = ""
+alarms.sort(key=lambda x: x["mpk"], reverse=False) 
+table = addTableToMail(table, header, "Alarmy braku reakcji CO2 na włączenie centrali wentylacyjnej", alarms)
+emailService.SendEmail("cze@solwena.pl", "Alarmy przegrzań temperaturowych", table) 
+emailService.SendEmail("aleksandra.kaminska@solwena.com", "Alarmy braku reakcji CO2 na włączenie centrali wentylacyjnej", table) 
