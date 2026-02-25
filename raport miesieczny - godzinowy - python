@@ -1,0 +1,145 @@
+#!/usr/bin/env python
+
+import xlsxwriter
+import os
+import time
+from datetime import datetime as dt, timedelta as td, date as d
+import pytz
+from calendar import monthrange
+
+#Konfiguracja raportu
+#devices[<dict>] - lista urządzeń dla których ma być wygenerowany raport
+#              definicja urządzenia: {"Name": {nazwa urządzenia wyświetlana w raporcie}, "FullID": {fullidentifier urządzenia}, "Attribute": {atrybut urządzenia}, "Multiplier": {mnożnik}, "Unit": {jednostka}}
+#
+#mails[<string>] - lista adresów mail odbiorców raportu
+#type = <"week"|"month"> - wybór typu raportu
+#title - tytuł raportu, który jest również tytułem wiadomości mail
+
+#----------------------------------------CONFIG----------------------------------------------------------
+
+devices = [
+    {"Name":"Licznik gazu - MacBAT 5 - Licznik główny","FullID":"WL00M1000001GCR4","Attribute":"Vb", "Multiplier":"1", "Unit":"m3"},
+    {"Name":"Licznik e-e (ZMD) - TL1","FullID":"WL00E1000001ECA5","Attribute":"ENCE", "Multiplier":"2250","Unit":"kWh"},
+    {"Name":"Licznik e-e (ZMD) - TL2","FullID":"WL00E1000002ECA5","Attribute":"ENCE", "Multiplier":"2250","Unit":"kWh"}
+]
+mails = ["mateusz.pochmara@solwena.com","roman.mirecki@geberit.com","adam.ksiazek@solwena.com","dawid.powojski@geberit.com","robert.rudowicz@geberit.com","renata.ladzinska@geberit.com","support@solwena.com", "ireneusz.zbroja@geberit.com"]
+#mails = ["adam.ksiazek@solwena.com"]
+title = "Raport miesięczny - godzinowy - liczniki główne"
+reportType = "month"
+fileName = "Raport miesieczny_liczniki_glowne_godzinowo.xlsx"
+
+#---------------------------------------------------------------------------------------------------------
+
+def raport(devices, reportType, mails):
+    for mail in mails:
+        reportTitle = title
+       
+        #getting date range
+        today = dt.today()
+        currentWeekNr = today.isocalendar().week
+        currentYear = today.isocalendar().year
+        reportWeekNr = f"{currentYear}-W{currentWeekNr - 1}"
+       
+        if (reportType == "week"):
+            startDate = dt.strptime(reportWeekNr + '-1', '%G-W%V-%u')
+            endDate = startDate + td(days=6)
+            numberOfDays = 7
+           
+        elif (reportType == "month"):
+            reportMonth = today.month - 1
+            if (reportMonth == 0):
+                  reportMonth = 12
+                  currentYear -= 1
+               
+            monthRange = monthrange(currentYear, reportMonth)
+            startDate = dt(currentYear, reportMonth, 1)
+            endDate = dt(currentYear, reportMonth, monthRange[1])
+            numberOfDays = monthRange[1]
+           
+        numberOfHours = numberOfDays * 24    
+        reportSubTitle = f"Przyrosty godzinowe - {startDate.date()} - {endDate.date()}"
+
+        mailTopic = reportTitle
+        mailContent = "Wygenerowano raport. Plik xlsx znajduje się w załączniku."
+
+        workbook = xlsxwriter.Workbook(fileName)
+        worksheet = workbook.add_worksheet()
+
+        #titles
+        worksheet.write(0, 0, reportTitle)
+        reportSubTitleFormat = workbook.add_format({'font_size': 20, 'bold': True})
+        worksheet.write(1, 0, reportSubTitle, reportSubTitleFormat)
+
+        #headers
+        headerFormat = workbook.add_format({'bg_color': '#FF9900', 'font_color': '#FFFFFF', 'border': 1, 'text_wrap': True})
+
+        worksheet.write(3, 0, "Liczniki", headerFormat)
+        for index, device in enumerate(devices):
+            worksheet.write(3, index+1, device["Name"], headerFormat)
+        worksheet.write(4, 0, "j.m", headerFormat)
+        for index, device in enumerate(devices):
+            worksheet.write(4, index+1, device["Unit"], headerFormat)
+
+        #dates
+       
+        dates = []
+        for hourIndex in range(0,numberOfHours,1):
+            hoursAgo = startDate + td(hours=hourIndex)
+            dates.append(hoursAgo)
+        #logger.Debug(dates)
+        #writing dates
+        for index, date in enumerate(dates):
+            dateFormat = workbook.add_format({'num_format': 'dd.mm.yyyy hh:MM:ss','bg_color': '#FF9900', 'font_color': '#FFFFFF','border': 1})
+           
+            worksheet.write(index+5, 0, date, dateFormat)
+
+        valueFormat = workbook.add_format({'border': 1,'num_format':'0.0'})
+        valueFormat2 = workbook.add_format({'border': 1,'num_format':'0'})
+       
+        poland = pytz.timezone("Poland")
+       
+        #values
+        for indexDevice, device in enumerate(devices):
+            for indexDate, date in enumerate(dates):  
+                #zmiana na lokalny czas
+                utc = pytz.utc
+                date = utc.localize(date)
+                date = date.astimezone(poland)
+               
+                valueFirstDay = deviceValuesService.GetDeviceDataBeforeDate(device["FullID"], device["Attribute"], date, date - td(hours=1))
+                valueLastDay = deviceValuesService.GetDeviceDataBeforeDate(device["FullID"], device["Attribute"], date + td(hours=1), date - td(hours=1))
+                if valueFirstDay and valueLastDay and (valueFirstDay < valueLastDay):
+                  diff = (float(valueLastDay) - float(valueFirstDay))*float(device["Multiplier"])
+                else:
+                    diff = None
+# w zależności od wartości format jest ustawiany: <100 #.# | >= 100 #              
+                diffString=str(diff)
+                if diffString != "None":
+                    if float(diffString)<100.0 and float(diffString)>-100.0:
+                        worksheet.write(indexDate + 5, indexDevice + 1, diff, valueFormat)
+                        worksheet.write(indexDate + 5, indexDevice + 1, diff, valueFormat)
+                    else:
+                        worksheet.write(indexDate + 5, indexDevice + 1, diff, valueFormat2)
+                        worksheet.write(indexDate + 5, indexDevice + 1, diff, valueFormat2)
+                else:
+                    worksheet.write(indexDate + 5, indexDevice + 1, diff, valueFormat)
+                    worksheet.write(indexDate + 5, indexDevice + 1, diff, valueFormat)
+        worksheet.set_row(0,25)
+        worksheet.set_row(1,25)
+        worksheet.set_row(2,25)
+        worksheet.set_row(3,45)
+        worksheet.set_column(0,0, 20)
+        worksheet.set_column(1,99, 30)
+        workbook. close()
+
+        emailService.SendEmail(mail, mailTopic, mailContent, [fileName])
+
+
+raport(devices, reportType, mails)
+
+
+
+
+ 
+ 
+ 
