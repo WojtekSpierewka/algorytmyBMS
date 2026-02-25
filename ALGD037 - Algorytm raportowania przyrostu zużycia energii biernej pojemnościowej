@@ -1,0 +1,227 @@
+#!/usr/bin/env python
+from globalvars import storeOpeningHoursTemp, kompensatorJMPnew, podzial_regionalny
+from datetime import datetime, timedelta
+import pytz
+
+
+algorithmActive = "1"
+
+
+#FUNKCJA
+def convert_to_warsaw_time(utc_time_str):
+    utc_time = datetime.strptime(utc_time_str, "%Y-%m-%d %H:%M")
+    utc_time = pytz.utc.localize(utc_time)
+    warsaw_time = utc_time.astimezone(warsawTz)
+    return warsaw_time.strftime("%Y-%m-%d %H:%M")
+
+
+#FUNKCJA
+def parse_datetime(timestamp):
+    return datetime.strptime(timestamp, "%Y-%m-%d %H:%M")
+
+
+def generate_yesterday_minutes():
+    # Get today's date and subtract one day to get yesterday
+    yesterday = datetime.now() - timedelta(days=7)
+
+    # Set the start of the day (00:00) and end of the day (23:59) for yesterday
+    start_time = yesterday.replace(hour=0, minute=0, second=0, microsecond=0)
+    end_time = yesterday.replace(hour=23, minute=59, second=0, microsecond=0)
+
+    # Create a list to store all minute-based daytimes
+    minutes_list = []
+
+    # Generate each minute from start_time to end_time
+    current_time = start_time
+    while current_time <= end_time:
+        minutes_list.append(current_time)
+        current_time += timedelta(minutes=1)
+
+    return minutes_list
+
+
+# FUNKCJA
+def create_co2_object(attributeNameTSO, yesterdayMinutes, dataTSO):
+    # Initialize the CO2 object
+    co2_object = {attributeNameTSO: [], "TimeStamp": yesterdayMinutes}
+    
+    # Initialize the CO2 day list
+    co2_day_list = []
+    
+    # Index to track the current position in the dataTSO list
+    index = 0
+    
+    # Loop through each minute in yesterdayMinutes
+    for minute in yesterdayMinutes:
+        # If the current minute is before the first DateTime in dataTSO, use the first value
+        if minute < dataTSO[0].DateTime:
+            co2_day_list.append(float(dataTSO[0].Value))
+        else:
+            # Otherwise, use the value at the current index
+            co2_day_list.append(float(dataTSO[index].Value))
+            
+            # If the current minute is after the current index's DateTime, move to the next index
+            if minute > dataTSO[index].DateTime and index < len(dataTSO) - 1:
+                index += 1
+    
+    # Update the co2_object with the populated CO2 day list
+    co2_object[attributeNameTSO] = co2_day_list
+    
+    return co2_object
+
+
+def time_to_minutes(time_str):
+    """
+    Convert time in "HH:MM" format to the corresponding minute of the day.
+    
+    Parameters:
+        time_str (str): A string representing time in "HH:MM" format.
+        
+    Returns:
+        int: The minute of the day (0-1439).
+    """
+    try:
+        # Split the string into hours and minutes
+        hours, minutes = map(int, time_str.split(':'))
+        
+        # Validate the input
+        if not (0 <= hours < 24 and 0 <= minutes < 60):
+            raise ValueError("Invalid time format")
+        
+        # Calculate the minute of the day
+        return hours * 60 + minutes
+    except ValueError:
+        raise ValueError("Time must be in the format HH:MM and within valid ranges (e.g., 23:59).")
+
+
+def calculate_average(numbers):
+    """
+    Calculate the average of a list of numbers.
+    
+    Parameters:
+        numbers (list): A list of numeric values.
+        
+    Returns:
+        float: The average of the numbers in the list. Returns None for an empty list.
+    """
+    if not numbers:  # Check if the list is empty
+        return None
+    return sum(numbers) / len(numbers)
+
+
+# PRZYGOTOWANIE DAT
+currentDate = datetime.utcnow() 
+todayDate = currentDate.replace(hour=0, minute=0, second=0, microsecond=0)
+
+######
+#todayDate = todayDate.replace(day=21)
+######
+
+todayDay = todayDate.day
+yesterdayDate = todayDate - timedelta(days=7)
+yesterdayDate = yesterdayDate.replace(hour=0, minute=0, second=0, microsecond=0)
+warsawTz = pytz.timezone('Europe/Warsaw')
+warsawTime = datetime.now(warsawTz)
+warsawTimeYesterday = warsawTime - timedelta(days=7)
+yesterdayMinutes = generate_yesterday_minutes()
+startOfMonthDay = todayDate - timedelta(days=todayDay-1)
+
+
+dataBase = storeOpeningHoursTemp.get()  
+activeAlgorithmList = deviceService.GetDevicesParameterListFromMnemonic("BRV0", ["latitude"])
+alarms = []
+no_compensators = []
+kompensatory = kompensatorJMPnew.get()
+kompensatory = kompensatory#["Raport"]
+
+kompensatory_lista = []
+adresy_lista = podzial_regionalny.get()
+adresy_lista = adresy_lista["Operational Separation"]
+adresy = {}
+additional_text = ""
+for adres in adresy_lista:
+    adresy[adres["NR B"]] = {"City": adres["City"], "Address": adres["Address"], "Region": adres["Region"]}
+
+
+for store in kompensatory:
+    if store["MPK "] != "brak":
+        storeMpk = int(store["MPK "])                        
+        #if "Czy jest Kompensator" in store: 
+        #    if store["Czy jest Kompensator"]:
+        kompensatory_lista.append(storeMpk)
+
+                
+                
+
+#ANALIZA TEMPERATURY
+for activeBuilding in activeAlgorithmList:
+    fullIdentifierBRV = activeBuilding.FullIdentifier
+    storeMpk = activeBuilding.FullIdentifier[4:8]
+    storeMpkNumber = int(storeMpk)
+    #DANE DOBOWE Z TSO
+    fullIdentifierTSO = deviceService.GetDevicesParameterList(fullIdentifierBRV[0:8] + "*5ECA0", ["Cap"])
+
+    if fullIdentifierTSO:
+        fullIdentifierTSO = fullIdentifierTSO[0].FullIdentifier
+    else:
+        continue
+
+    
+    capEnergyWeekAgo = deviceValuesService.GetDeviceDataBeforeDate(fullIdentifierTSO, "Cap", yesterdayDate, 1)
+    capEnergyToday = deviceValuesService.GetDeviceDataBeforeDate(fullIdentifierTSO, "Cap", todayDate, 1)
+    capEnergyStartOfMonth = deviceValuesService.GetDeviceDataBeforeDate(fullIdentifierTSO, "Cap", startOfMonthDay, 1)
+    if capEnergyWeekAgo and capEnergyToday:
+        pvGenerated = float(capEnergyToday) - float(capEnergyWeekAgo)
+        if capEnergyStartOfMonth:
+            capEnergyUsedMonth = float(capEnergyToday) - float(capEnergyStartOfMonth)
+        else:
+            capEnergyUsedMonth = 0
+        mpk = fullIdentifierTSO[4:8]
+        
+        if pvGenerated > 10 and int(storeMpk) in kompensatory_lista:
+            try:
+                alarms.append({"mpk": fullIdentifierTSO[4:8], "pvGenerated": pvGenerated, "capEnergyMonth": capEnergyUsedMonth, "region": adresy[storeMpk]["Region"], "city": adresy[storeMpk]["City"], "address": adresy[storeMpk]["Address"]})
+            except:
+                additional_text = f"{additional_text}</br>Sklep {storeMpk} z kompensatorem miał trudność z dodaniem się do tabeli.  W poprzednim tygodniu przyrost energii biernej pojemnościowej wyniósł {round(pvGenerated,1)} kvarh, a od początku miesiąca {round(capEnergyUsedMonth,1)} kvarh."
+        elif pvGenerated > 800 and int(storeMpk) not in kompensatory_lista:
+            try:
+                no_compensators.append({"mpk": fullIdentifierTSO[4:8], "pvGenerated": pvGenerated, "capEnergyMonth": capEnergyUsedMonth, "region": adresy[storeMpk]["Region"], "city": adresy[storeMpk]["City"], "address": adresy[storeMpk]["Address"]})
+            except:
+                additional_text = f"{additional_text}</br>Sklep {storeMpk} bez kompensatora miał trudność z dodaniem się do tabeli. W poprzednim tygodniu przyrost energii biernej pojemnościowej wyniósł {round(pvGenerated,1)} kvarh, a od początku miesiąca {round(capEnergyUsedMonth,1)} kvarh."
+            
+        
+def addTableToMail(table, header, textAbove, alarms):
+    if not table:        
+        table = f"{header}<h1>{textAbove}</h1>"
+    else:
+        table = f"{table}<h1>{textAbove}</h1>"
+    table = f"{table}<table class='old-table'><tr class='firstRow'>"
+    table = f"{table}<td>MPK</td><td>Region</td><td>Miasto</td><td>Ulica</td><td>Przyrost energii biernej pojemnościowej [kvarh] w danym okresie</td><td>Od początku miesiąca [kvarh]</td></tr>"
+    previousMPK = None
+    whiteRow = True
+    for alarm in alarms:        
+        if previousMPK != alarm["mpk"]:
+            whiteRow = not whiteRow
+        if whiteRow:
+            table = f'{table}<tr><td>{alarm["mpk"]}</td><td>{alarm["region"]}</td><td>{alarm["city"]}</td><td>{alarm["address"]}</td><td>{round(alarm["pvGenerated"],1)}</td><td>{round(alarm["capEnergyMonth"],1)}</td></tr>'
+        else:
+            table = f'{table}<tr bgcolor="Wheat"><td>{alarm["mpk"]}</td><td>{alarm["region"]}</td><td>{alarm["city"]}</td><td>{alarm["address"]}</td><td>{round(alarm["pvGenerated"],1)}</td><td>{round(alarm["capEnergyMonth"],1)}</td></tr>'
+        previousMPK = alarm["mpk"]    
+    table = f"{table}</tr></table></br></br>"
+    return table   
+
+header = "<style>.old-table{border-collapse:collapse;border-style:hidden;    border-width:1px;    border-style:solid;    border-color:black;    font-family:Montserrat;    font-size:11px;    text-align:center;}.old-table td {    border:1px solid black;    padding:8;}.old-table th{    border:1pxsolidblack;    padding:4;}.firstRow{    background-color:#e67e22;    color:white;}h1{    font-family:Montserrat;    font-size:21px;}h2{    font-family:Montserrat;    font-size:16px;} .outer-table {border-collapse: collapse;border-spacing: 0px;} .outer-table td {padding: 0;} .inner-table { border-collapse: collapse; border-spacing: 0;font-family:Montserrat;    font-size:11px;    text-align:center;} .inner-table td {border: 1px solid black;padding: 8;} </style>"
+table = ""
+alarms.sort(key=lambda x: x["pvGenerated"], reverse=True) 
+no_compensators.sort(key=lambda x: x["pvGenerated"], reverse=True) 
+table = addTableToMail(table, header, f"Raport: Alarmy zużycia energii biernej pojemnościowej- raport za tydzień {(todayDate - timedelta(days=7)).date()} - {(todayDate - timedelta(days=1)).date()} <br><br>Sklepy z kompensatorem mocy biernej", alarms)
+
+table = addTableToMail(table, header, f"Sklepy bez kompensatora mocy biernej", no_compensators)
+
+table = f'{table}{additional_text}</br>'
+table = f'{table} \n \n Pozdrawiamy/Regards <br>--<br>Centrum Zarządzania Energią (CZE) - SOLWENA<br>Email: <a href="mailto:cze@solwena.pl">cze@solwena.pl</a> <br>Mobile: <a href="tel:+48537277233">+48 537 277 233</a> <br>Web: <a href="https://solwena.com">https://solwena.com</a><br><br>Wygenerował system Percee'
+
+emailService.SendEmail("aleksandra.kaminska@solwena.com", "[Raport] PERCEE: Przyrosty energii biernej pojemnościowej", table) 
+emailService.SendEmail("cze@solwena.pl", "[Raport] PERCEE: Przyrosty energii biernej pojemnościowej", table) 
+emailService.SendEmail("pawel.wieczorek@jeronimo-martins.com", "[Raport] PERCEE: Przyrosty energii biernej pojemnościowej", table)
+
