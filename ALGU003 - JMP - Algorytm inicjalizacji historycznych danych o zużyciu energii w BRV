@@ -1,0 +1,15 @@
+#!/usr/bin/env python
+
+from globalvars import gsAplikacjaID, gsMnemonikWlasciciela, HistoricalEEUseToInit
+import json
+
+
+jsonObject = json.loads(str(HistoricalEEUseToInit))
+BRVList = deviceService.GetDevicesParameterListFromMnemonic("BRV0", ["TemperatureFollowingAlgorithmActive"])
+
+for brv in BRVList:
+    brvNumber = brv.FullIdentifier[4:8]
+    if brvNumber in jsonObject:
+        
+        frameData = f'HistoricJanuaryEE={jsonObject[brvNumber]["january"]*1000000};HistoricFebruaryEE={jsonObject[brvNumber]["february"]*1000000};HistoricMarchEE={jsonObject[brvNumber]["march"]*1000000};HistoricAprilEE={jsonObject[brvNumber]["april"]*1000000};HistoricMayEE={jsonObject[brvNumber]["may"]*1000000};HistoricJuneEE={jsonObject[brvNumber]["june"]*1000000};HistoricJulyEE={jsonObject[brvNumber]["july"]*1000000};HistoricAugustEE={jsonObject[brvNumber]["august"]*1000000};HistoricSeptemberEE={jsonObject[brvNumber]["september"]*1000000};HistoricOctoberEE={jsonObject[brvNumber]["october"]*1000000};HistoricNovemberEE={jsonObject[brvNumber]["november"]*1000000};HistoricDecemberEE={jsonObject[brvNumber]["december"]*1000000}'
+        frameService.AddFrameToSend("M", gsMnemonikWlasciciela.get(), brv.FullIdentifier, gsAplikacjaID.get(), frameData)
