@@ -1,0 +1,256 @@
+#!/usr/bin/env python
+import datetime
+import time
+from globalvars import storeOperatingHours
+from datetime import datetime, timedelta
+import pytz
+import numpy as np
+
+#FUNKCJA
+def convert_to_warsaw_time(utc_time_str):
+    utc_time = datetime.strptime(utc_time_str, "%Y-%m-%d %H:%M")
+    utc_time = pytz.utc.localize(utc_time)
+    warsaw_time = utc_time.astimezone(warsawTz)
+    return warsaw_time.strftime("%Y-%m-%d %H:%M")
+
+#FUNKCJA
+def parse_datetime(timestamp):
+    return datetime.strptime(timestamp, "%Y-%m-%d %H:%M")
+
+def generate_yesterday_minutes(currentDate):
+    # Get today's date and subtract one day to get yesterday
+    yesterday = currentDate - timedelta(days=14)
+
+    # Set the start of the day (00:00) and end of the day (23:59) for yesterday
+    start_time = yesterday.replace(hour=0, minute=0, second=0, microsecond=0)# - timedelta(hours=1)
+    end_time = currentDate.replace(hour=0, minute=0, second=0, microsecond=0) - timedelta(minutes=1)# - timedelta(hours=1)
+
+    # Create a list to store all minute-based daytimes
+    minutes_list = []
+
+    # Generate each minute from start_time to end_time
+    current_time = start_time
+    while current_time <= end_time:
+        
+        minutes_list.append(current_time.timestamp())
+        current_time += timedelta(minutes=1)
+
+    return minutes_list
+
+# FUNKCJA
+def create_co2_object_final_optimized(attributeNameTSO, yesterdayMinutes_dt, dataTSO_dt_tuples):
+    """
+    Optimized function assuming both yesterdayMinutes and dataTSO_dt_tuples 
+    contain native Python datetime objects for fast comparison.
+    """
+    
+    # Initialize the CO2 day list
+    co2_day_list = []
+    co2_day_list_append = co2_day_list.append # Micro-optimization: store append method
+    
+    # 1. Handle the edge case of empty data
+    if not dataTSO_dt_tuples:
+        return {attributeNameTSO: [None] * len(yesterdayMinutes_dt), "TimeStamp": yesterdayMinutes_dt}
+
+    # Pre-calculate values outside the loop for speed
+    data_length = len(dataTSO_dt_tuples)
+    
+    # Access native datetime objects at index [0]
+    first_datetime = dataTSO_dt_tuples[0][0] 
+    first_value = dataTSO_dt_tuples[0][1] 
+    
+    data_index = 0
+
+    # 2. Core Loop (O(N+M) logic)
+    for minute in yesterdayMinutes_dt:
+        
+        # a. Handle minutes before the first data point
+        # This is now a fast native datetime comparison
+        if minute < first_datetime:
+            co2_day_list_append(first_value)
+            continue 
+            
+        # b. Advance the data_index (Two-Pointer Logic)
+        # All comparisons are now fast native datetime comparisons
+        while data_index < data_length - 1 and minute >= dataTSO_dt_tuples[data_index + 1][0]:
+            data_index += 1
+        
+        # c. Append the value
+        # The value is at index [1] of the tuple, and is already a float
+        co2_day_list_append(dataTSO_dt_tuples[data_index][1])
+            
+    # 3. Final Construction
+    return {attributeNameTSO: co2_day_list, "TimeStamp": yesterdayMinutes_dt}
+
+def time_to_minutes(time_str):
+    """
+    Convert time in "HH:MM" format to the corresponding minute of the day.
+    
+    Parameters:
+        time_str (str): A string representing time in "HH:MM" format.
+        
+    Returns:
+        int: The minute of the day (0-1439).
+    """
+    try:
+        # Split the string into hours and minutes
+        hours, minutes = map(int, time_str.split(':'))
+        
+        # Validate the input
+        if not (0 <= hours < 24 and 0 <= minutes < 60):
+            raise ValueError("Invalid time format")
+        
+        # Calculate the minute of the day
+        return hours * 60 + minutes
+    except ValueError:
+        raise ValueError("Time must be in the format HH:MM and within valid ranges (e.g., 23:59).")
+
+def calculate_average(numbers):
+    """
+    Calculate the average of a list of numbers.
+    
+    Parameters:
+        numbers (list): A list of numeric values.
+        
+    Returns:
+        float: The average of the numbers in the list. Returns None for an empty list.
+    """
+    if not numbers:  # Check if the list is empty
+        return None
+    return sum(numbers) / len(numbers)
+
+def convert_csharp_to_python_datetime(csharp_dt_object):
+    # 1. Convert C# object to a Python string representation
+    dt_str = str(csharp_dt_object) 
+    
+    # 2. Parse the string into a Python datetime object
+    return datetime.strptime(dt_str, DATE_FORMAT)
+
+def convert_unix_to_date(timestamp: int, timezone: str = 'UTC') -> str:
+    """
+    Converts a Unix timestamp (seconds since Epoch) into a human-readable date and time string.
+    Args:
+        timestamp (int): The Unix timestamp to convert.
+        timezone (str): Specifies the timezone for the output. 
+                        Options are 'UTC' or 'Local'. Defaults to 'UTC'.
+
+    Returns:
+        str: The formatted date and time string.
+    """
+    try:
+        if timezone.upper() == 'UTC':
+            # Use datetime.utcfromtimestamp (or datetime.fromtimestamp with utc timezone)
+            # to get the time in UTC, which is the standard interpretation of the timestamp.
+            dt_object = datetime.datetime.fromtimestamp(timestamp, tz=datetime.timezone.utc)
+            # Format the string to include the UTC timezone identifier
+            return dt_object.strftime('%Y-%m-%d')
+        elif timezone.upper() == 'LOCAL':
+            # Use datetime.fromtimestamp to get the time in the system's local timezone.
+            # This relies on the environment where the code is run.
+            dt_object = datetime.datetime.fromtimestamp(timestamp)
+            # Format the string, showing it is local time
+            return dt_object.strftime('%Y-%m-%d %H:%M:%S (Local Time)')
+        
+        else:
+            return f"Error: Invalid timezone argument '{timezone}'. Use 'UTC' or 'Local'."
+
+    except ValueError as e:
+        return f"Error converting timestamp: {e}"
+activeAlgorithmList = deviceService.GetDevicesParameterListFromMnemonic("BRV0", ["SecurityGuardDamage"])
+
+brvList = []
+for store in activeAlgorithmList:
+    if store.Value:
+        sgd_value = int(store.Value)
+        if sgd_value == 1:
+            brvList.append(f"{store.FullIdentifier[0:8]}0000LLO0")
+            
+
+# PRZYGOTOWANIE DAT
+currentDate = datetime.utcnow()
+ 
+todayDate = currentDate.replace(hour=0, minute=0, second=0, microsecond=0)
+yesterdayDate = currentDate - timedelta(days=14)
+yesterdayDate = yesterdayDate.replace(hour=0, minute=0, second=0, microsecond=0) - timedelta(hours=1)
+yesterdayMinutes = generate_yesterday_minutes(currentDate)
+DATE_FORMAT = "%d.%m.%Y %H:%M:%S" # Example format string
+
+dataBase = storeOperatingHours.get()  
+activeAlgorithmList = brvList#[0:1]
+
+dataLLO = deviceRecordsService.GetRawRecords(["StoreIsOpen"], activeAlgorithmList, yesterdayDate, todayDate)
+
+dataDownloaded = {}
+
+alarms = []
+no_alarms = []
+
+for i in range(len(dataLLO)):
+    if dataLLO[i].FullIdentifier not in dataDownloaded:
+        dataDownloaded[dataLLO[i].FullIdentifier] = {}
+        
+    dataDownloaded[dataLLO[i].FullIdentifier][dataLLO[i].Name] = dataLLO[i]
+    
+for item in dataDownloaded:      
+    attributeNameLLO = "StoreIsOpen"
+    if "StoreIsOpen" not in dataDownloaded[item]:
+        continue
+        
+    dataLLO_StoreIsForcedWorking = dataDownloaded[item]["StoreIsOpen"].Data
+    
+    fullIdentifier = item
+    storeMpk = fullIdentifier[4:8]
+    
+    dataLLO_fast = []
+    dataLLO_Enable_fast = []
+    for obj in dataLLO_StoreIsForcedWorking:
+        dataLLO_fast.append((convert_csharp_to_python_datetime(obj.DateTime).timestamp(), float(obj.Value)))  
+        
+    dataTSO = create_co2_object_final_optimized(attributeNameLLO, yesterdayMinutes, dataLLO_fast)[attributeNameLLO]
+    flag = False
+    for i in range(14):
+        data_to_analyze = dataTSO[480+i*1440:1200+i*1440]
+        count_zeroes = data_to_analyze.count(0)
+        if count_zeroes > 0 and count_zeroes < 60:
+            flag = True
+    if flag:
+        alarms.append({"mpk": storeMpk})
+    else:
+        no_alarms.append({"mpk": storeMpk})
+        
+def addTableToMail(table, header, textAbove, alarms):
+    if not table:        
+        table = f"{header}<h1>{textAbove}</h1>"
+    else:
+        table = f"{table}<h1>{textAbove}</h1>"
+    table = f"{table}<table class='old-table'><tr class='firstRow'>"
+    table = f"{table}<td>MPK</td></tr>"
+    previousMPK = None
+    whiteRow = True
+    for alarm in alarms:        
+        if previousMPK != alarm["mpk"]:
+            whiteRow = not whiteRow
+        if whiteRow:
+            table = f'{table}<tr><td>{alarm["mpk"]}</td></tr>'
+        else:
+            table = f'{table}<tr bgcolor="Wheat"><td>{alarm["mpk"]}</td></tr>'
+        previousMPK = alarm["mpk"]    
+    table = f"{table}</tr></table></br></br>"
+    return table   
+
+
+    
+header = "<style>.old-table{border-collapse:collapse;border-style:hidden;    border-width:1px;    border-style:solid;    border-color:black;    font-family:Montserrat;    font-size:11px;    text-align:center;}.old-table td {    border:1px solid black;    padding:8;}.old-table th{    border:1pxsolidblack;    padding:4;}.firstRow{    background-color:#e67e22;    color:white;}h1{    font-family:Montserrat;    font-size:21px;}h2{    font-family:Montserrat;    font-size:16px;} .outer-table {border-collapse: collapse;border-spacing: 0px;} .outer-table td {padding: 0;} .inner-table { border-collapse: collapse; border-spacing: 0;font-family:Montserrat;    font-size:11px;    text-align:center;} .inner-table td {border: 1px solid black;padding: 8;} </style>"
+table = ""
+alarms.sort(key=lambda x: x["mpk"], reverse=True) 
+no_alarms.sort(key=lambda x: x["mpk"], reverse=True)
+title = "Status StoreIsOpen w sklepach z SecurityGuardDamage"
+table = addTableToMail(table, header, "Sklepy, w których wykryto dalsze wachania sygnału StoreIsOpen", alarms)
+table = addTableToMail(table, header, "Sklepy, w których nie wykryto dalszego wachania sygnału StoreIsOpen", no_alarms)
+emailService.SendEmail("cze@solwena.pl", title, table) 
+#emailService.SendEmail("pawel.wieczorek@jeronimo-martins.com", title, table) 
+#emailService.SendEmail("arkadiusz.rak@solwena.com", title, table) 
+emailService.SendEmail("maciej.kirschke@solwena.com", title, table)
+emailService.SendEmail("wojciech.spierewka@solwena.com", title, table) 
+emailService.SendEmail("maksym.kostiuchenko@solwena.com", title, table) 
+#emailService.SendEmail("aleksandra.kaminska@solwena.com", title, table)
