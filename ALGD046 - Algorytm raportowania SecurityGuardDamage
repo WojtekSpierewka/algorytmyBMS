@@ -1,0 +1,73 @@
+#!/usr/bin/env python
+import datetime
+import time
+def convert_unix_to_date(timestamp: int, timezone: str = 'UTC') -> str:
+    """
+    Converts a Unix timestamp (seconds since Epoch) into a human-readable date and time string.
+    Args:
+        timestamp (int): The Unix timestamp to convert.
+        timezone (str): Specifies the timezone for the output. 
+                        Options are 'UTC' or 'Local'. Defaults to 'UTC'.
+    Returns:
+        str: The formatted date and time string.
+    """
+    try:
+        if timezone.upper() == 'UTC':
+            # Use datetime.utcfromtimestamp (or datetime.fromtimestamp with utc timezone)
+            # to get the time in UTC, which is the standard interpretation of the timestamp.
+            dt_object = datetime.datetime.fromtimestamp(timestamp, tz=datetime.timezone.utc)
+            # Format the string to include the UTC timezone identifier
+            return dt_object.strftime('%Y-%m-%d')
+        elif timezone.upper() == 'LOCAL':
+            # Use datetime.fromtimestamp to get the time in the system's local timezone.
+            # This relies on the environment where the code is run.
+            dt_object = datetime.datetime.fromtimestamp(timestamp)
+            # Format the string, showing it is local time
+            return dt_object.strftime('%Y-%m-%d %H:%M:%S (Local Time)')
+        else:
+            return f"Error: Invalid timezone argument '{timezone}'. Use 'UTC' or 'Local'."
+    except ValueError as e:
+        return f"Error converting timestamp: {e}"
+activeAlgorithmList = deviceService.GetDevicesParameterListFromMnemonic("BRV0", ["SecurityGuardDamage"])
+alarms = []
+for store in activeAlgorithmList:
+    if store.Value:
+        sgd_value = int(store.Value)
+        if sgd_value == 1:
+            mpk = store.FullIdentifier[4:8]
+            dt_object_naive = datetime.datetime.strptime(str(store.TimeStamp), "%d.%m.%Y %H:%M:%S")
+            dt_object_utc = dt_object_naive.replace(tzinfo=datetime.timezone.utc)
+            unix_timestamp = dt_object_utc.timestamp()
+            alarms.append({"mpk": mpk, "date": unix_timestamp})
+def addTableToMail(table, header, textAbove, alarms):
+    if not table:        
+        table = f"{header}<h1>{textAbove} ({len(alarms)})</h1>"
+    else:
+        table = f"{table}<h1>{textAbove}</h1>"
+    table = f"{table}<table class='old-table'><tr class='firstRow'>"
+    table = f"{table}<td>MPK</td><td>Data załączenia</td></tr>"
+    previousMPK = None
+    whiteRow = True
+    for alarm in alarms:        
+        if previousMPK != alarm["mpk"]:
+            whiteRow = not whiteRow
+        if whiteRow:
+            table = f'{table}<tr><td>{alarm["mpk"]}</td><td>{convert_unix_to_date(alarm["date"])}</td></tr>'
+        else:
+            table = f'{table}<tr bgcolor="Wheat"><td>{alarm["mpk"]}</td><td>{convert_unix_to_date(alarm["date"])}</td></tr>'
+        previousMPK = alarm["mpk"]    
+    table = f"{table}</tr></table></br></br>"
+    return table       
+header = "<style>.old-table{border-collapse:collapse;border-style:hidden;    border-width:1px;    border-style:solid;    border-color:black;    font-family:Montserrat;    font-size:11px;    text-align:center;}.old-table td {    border:1px solid black;    padding:8;}.old-table th{    border:1pxsolidblack;    padding:4;}.firstRow{    background-color:#e67e22;    color:white;}h1{    font-family:Montserrat;    font-size:21px;}h2{    font-family:Montserrat;    font-size:16px;} .outer-table {border-collapse: collapse;border-spacing: 0px;} .outer-table td {padding: 0;} .inner-table { border-collapse: collapse; border-spacing: 0;font-family:Montserrat;    font-size:11px;    text-align:center;} .inner-table td {border: 1px solid black;padding: 8;} </style>"
+table = ""
+alarms.sort(key=lambda x: x["date"], reverse=False) 
+title = "Czas trwania SecurityGuardDamage"
+table = addTableToMail(table, header, title, alarms)
+#emailService.SendEmail("cze@solwena.pl", title, table) 
+#emailService.SendEmail("pawel.wieczorek@jeronimo-martins.com", title, table) 
+#emailService.SendEmail("arkadiusz.rak@solwena.com", title, table) 
+emailService.SendEmail("maciej.kirschke@solwena.com", title, table)
+emailService.SendEmail("wojciech.spierewka@solwena.com", title, table) 
+#emailService.SendEmail("kinga.formella@solwena.com", title, table) 
+emailService.SendEmail("maksym.kostiuchenko@solwena.com", title, table) 
+#emailService.SendEmail("aleksandra.kaminska@solwena.com", title, table)
