@@ -1,0 +1,111 @@
+#!/usr/bin/env python
+from datetime import datetime, date, time, timedelta
+from globalvars import gsAplikacjaID, gsMnemonikWlasciciela
+
+def time_to_minutes(time_str):
+    hours, minutes = map(int, time_str.split(':'))
+    return hours * 60 + minutes
+
+def minutes_in_day(opening_time_str, closing_time_str):
+    opening_minutes = time_to_minutes(opening_time_str)
+    closing_minutes = time_to_minutes(closing_time_str)
+    minutes_open = closing_minutes - opening_minutes
+    if minutes_open < 0:
+        # If closing time is before opening time, it's past midnight
+        minutes_open += 24 * 60  # Add a day's worth of minutes
+    return minutes_open
+
+def decimal_to_hours_minutes(decimal_hours):
+    hours = int(decimal_hours)
+    minutes = int((decimal_hours - hours) * 60)
+    return hours, minutes
+
+buildingList = deviceService.GetBaseDeviceList("*BRV0")
+
+# Get current date
+today = date.today()
+
+# Create a midnight time object
+midnight = time()
+
+# Combine date and midnight time to get datetime at midnight
+today_midnight = datetime.combine(today, midnight)
+
+alarms = []
+
+def getOverheating(brvFullIdentifier, zone):
+    ahuList = deviceService.GetBaseDeviceList(f"{brvFullIdentifier[0:8]}*TSO0")
+    if zone == "SalesZoneTemp":
+        writeZone = "Strefa sprzedaży"
+    elif zone == "CashDeskZoneTemp":
+        writeZone = "Strefa kas"
+    elif zone == "DayWarehouseTemp":
+        writeZone = "Magazyn dzienny"
+    elif zone == "NightWarehouseTemp":
+        writeZone = "Magazyn nocny"
+    if ahuList:
+        ahuFullIdentifier = ahuList[0].FullIdentifier
+        temp = deviceLastAttributeValueService.Get(ahuFullIdentifier, zone)
+        if temp:
+            tempValue = temp.NumericValue
+            #if tempValue > 21:
+            alarms.append({"mpk": ahuFullIdentifier[4:8], "temperatureProblem": round(tempValue, 2), "strefa": writeZone})  
+
+            
+def tooCool(brvFullIdentifier, zone):            
+    ahuList = deviceService.GetBaseDeviceList(f"{brvFullIdentifier[0:8]}*TSO0")
+    if zone == "SalesZoneTemp":
+        writeZone = "Strefa sprzedaży"
+    elif zone == "CashDeskZoneTemp":
+        writeZone = "Strefa kas"
+    elif zone == "DayWarehouseTemp":
+        writeZone = "Magazyn dzienny"
+    elif zone == "NightWarehouseTemp":
+        writeZone = "Magazyn nocny"
+    if ahuList:
+        ahuFullIdentifier = ahuList[0].FullIdentifier
+        temp = deviceLastAttributeValueService.Get(ahuFullIdentifier, zone)
+        if temp:
+            tempValue = temp.NumericValue
+            if tempValue < 17:
+                alarms.append({"mpk": ahuFullIdentifier[4:8], "temperatureProblem": round(tempValue, 2), "strefa": writeZone})
+        
+    
+for building in buildingList:
+    brvFullIdentifier = building.FullIdentifier
+    getOverheating(brvFullIdentifier, "SalesZoneTemp")
+    getOverheating(brvFullIdentifier, "CashDeskZoneTemp")
+    getOverheating(brvFullIdentifier, "DayWarehouseTemp")
+    getOverheating(brvFullIdentifier, "NightWarehouseTemp")
+    #tooCool(brvFullIdentifier, "SalesZoneTemp")
+    #tooCool(brvFullIdentifier, "CashDeskZoneTemp")
+    #tooCool(brvFullIdentifier, "DayWarehouseTemp")
+    #tooCool(brvFullIdentifier, "NightWarehouseTemp")
+
+    
+def addTableToMail(table, header, textAbove, alarms):
+    if not table:        
+        table = f"{header}<h1>{textAbove}</h1>"
+    else:
+        table = f"{table}<h1>{textAbove}</h1>"
+    table = f"{table}<table class='old-table'><tr class='firstRow'>"
+    table = f"{table}<td>MPK</td><td>Strefa</td><td>Temperatura</td></tr>"
+    previousMPK = None
+    whiteRow = True
+    for alarm in alarms:        
+        if previousMPK != alarm["mpk"]:
+            whiteRow = not whiteRow
+        if whiteRow:
+            table = f'{table}<tr><td>{alarm["mpk"]}</td><td>{alarm["strefa"]}</td><td>{alarm["temperatureProblem"]}°C</td></tr>'
+        else:
+            table = f'{table}<tr bgcolor="Wheat"><td>{alarm["mpk"]}</td><td>{alarm["strefa"]}</td><td>{alarm["temperatureProblem"]}°C</td></tr>'
+        previousMPK = alarm["mpk"]    
+    table = f"{table}</tr></table></br></br>"
+    return table   
+
+header = "<style>.old-table{border-collapse:collapse;border-style:hidden;    border-width:1px;    border-style:solid;    border-color:black;    font-family:Montserrat;    font-size:11px;    text-align:center;}.old-table td {    border:1px solid black;    padding:8;}.old-table th{    border:1pxsolidblack;    padding:4;}.firstRow{    background-color:#e67e22;    color:white;}h1{    font-family:Montserrat;    font-size:21px;}h2{    font-family:Montserrat;    font-size:16px;} .outer-table {border-collapse: collapse;border-spacing: 0px;} .outer-table td {padding: 0;} .inner-table { border-collapse: collapse; border-spacing: 0;font-family:Montserrat;    font-size:11px;    text-align:center;} .inner-table td {border: 1px solid black;padding: 8;} </style>"
+table = ""
+alarms.sort(key=lambda x: x["mpk"], reverse=False) 
+table = addTableToMail(table, header, "Alarmy przekroczeń temperaturowych", alarms)
+emailService.SendEmail("cze@solwena.pl", "Alarmy przekroczeń temperaturowych", table) 
+#emailService.SendEmail("aleksandra.kaminska@solwena.com", "Alarmy przekroczeń temperaturowych", table) 
